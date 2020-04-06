@@ -22,19 +22,20 @@ class KNN():
         (self.dist indicates the order of the norm)
         """
         num_test, num_train = X.shape[0], self.X.shape[0]
-        dists = np.zeros((X_sz, self.X.shape[0]))
+        dists = np.zeros((num_test, num_train))
 
         if self.dist == 2:
-            test_sqr = np.reshape(np.sum(X**2, axis=1), [num_test, 1])
-            train_sqr = np.reshape(np.sum(self.X**2, axis=1), [1, num_train)
+            test_sqr = np.sum(X**2, axis=1).reshape((num_test, 1))
+            train_sqr = np.sum(self.X**2, axis=1).reshape((1, num_train))
             test_train = np.matmul(X, self.X.T)
-            
-            dists = np.sqrt(test_sqr + train_sqr - 2 * test_train)
+
+            # This can cause runtime error since the argument can be a negative number
+            dists = np.sqrt(test_sqr+train_sqr-2*test_train)
+            # Replace nan values with 0
+            np.nan_to_num(dists, copy=False)
         else:
-            with tqdm(total = X_sz) as pbar:
-                for i in range(X_sz):
-                    dists[i, :] = norm(self.X - X[i], self.dist, axis = 1)
-                    pbar.update(1)
+            for i in range(num_test):
+                dists[i, :] = norm(self.X - X[i], self.dist, axis=1)
         
         return dists
 
