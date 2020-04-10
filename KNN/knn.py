@@ -4,7 +4,7 @@ from numpy.linalg import norm
 from tqdm import tqdm
 
 class KNN():
-    def __init__(self, k, dist):
+    def __init__(self, k, dist=2):
         self.k = k
         self.dist = dist
     
@@ -41,15 +41,20 @@ class KNN():
 
     def predict(self, X):
         dists = self.compute_distances(X)
-        dists_sort = np.argsort(dists, axis = 1)
+        dists_sort = np.argsort(dists, axis=1)
 
         X_sz = X.shape[0]
         preds = np.zeros(X_sz)
 
         for i in range(X_sz):
             nearest_neighbors = self.y[dists_sort[i][:self.k]]
-            uniq, cnt = np.unique(nearest_neighbors, return_counts = True)
+            uniq, cnt = np.unique(nearest_neighbors, return_counts=True)
             max_cnt = np.sort(cnt)[-1]
-            preds[i] = uniq[np.where(cnt == max_cnt)[0][0]]
+            preds[i] = uniq[np.where(cnt==max_cnt)[0][0]]
         
         return preds
+    
+    def get_nearest_neighbors(self, x):
+        dists = self.compute_distances(x.reshape(1, x.shape[0]))
+        dists_sort = np.argsort(dists, axis=1)
+        return dists_sort
