@@ -1,2 +1,5 @@
-.ipynb_checkpoints/
+KNN/MNIST/.ipynb_checkpoints
 KNN/__pycache__/
+
+Vanilla_NN/MNIST/.ipynb_checkpoints
+Vanilla_NN/__pycache__/
