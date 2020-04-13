@@ -2,6 +2,8 @@
 
 KNN/MNIST/.ipynb_checkpoints/
 KNN/__pycache__/
+KNN/MNIST/data/
 
 Vanilla_NN/MNIST/.ipynb_checkpoints/
 Vanilla_NN/__pycache__/
+Vanilla_NN/MNIST/data/
