@@ -1,5 +1,5 @@
 import numpy as np
-from tqdm import tqdm
+from tqdm import trange
 
 class NeuralNet():
   ### Initialization ###
@@ -13,8 +13,6 @@ class NeuralNet():
     self.input_dim = input_dim
     self.hidden_dim = hidden_dim
     self.output_dim = output_dim
-
-    self.grads = {}
   
   ### Activation Functions ###
   def sigmoid(self, A):
@@ -23,83 +21,79 @@ class NeuralNet():
     """
     return 1 / (1 + np.exp(-A))
   
+  def relu(self, A):
+    """
+    Apply ReLU activation to array
+    """
+    return np.maximum(0, A)
+  
   def softmax(self, A):
     """
     Apply softmax activation to array
     """
-    A = np.exp(A)
-    # Expand dimension from (x,) to (x, 1)
-    sum_of_rows = np.expand_dims(np.sum(A, axis=1), axis=1)
-    return A / sum_of_rows
+    A_exp = np.exp(A)
+    sum_of_rows = np.sum(A_exp, axis=1, keepdims=True)
 
-  def num_grad(self, func, X):
-    h = 1e-9
-    N, M = X.shape
-    grad = np.empty_like(X)
-
-    for i in range(N):
-      for j in range(M):
-        grad = (func(X[i, j]+h) - func(X[i, j]-h)) / 2*h
-    return grad
+    return A_exp / sum_of_rows
   
   ### Main Dataflow Routines ###
-  def loss(self, X, y=None, reg=0):
+  def loss(self, X, y=None, act='relu', reg=0):
     N, H, C = X.shape[0], self.hidden_dim, self.output_dim
 
     # 1. Forward pass
-    self.H_ = np.matmul(X, self.params['W1']) + self.params['b1']
-    self.H = self.sigmoid(self.H_)
-    assert self.H.shape == (N, H), "Hidden layer dimension mismatch"
+    H_lin = np.matmul(X, self.params['W1']) + self.params['b1']
+    if act == 'relu':
+      H_act = self.relu(H_lin)
+    elif act == 'sigmoid':
+      H_act = self.sigmoid(H_lin)
 
-    self.O = np.matmul(self.H, self.params['W2']) + self.params['b2']
-    assert self.O.shape == (N, C), "Output layer dimension mismatch"
+    assert H_act.shape == (N, H), "Hidden layer dimension mismatch"
+
+    O = np.matmul(H_act, self.params['W2']) + self.params['b2']
+    assert O.shape == (N, C), "Output layer dimension mismatch"
     
-    O_copy = self.O.copy()
     # Remove numerical instability
-    O_copy -= np.expand_dims(np.max(O_copy, axis=1), axis=1)
-    self.smx = self.softmax(O_copy)
+    O -= np.max(O, axis=1, keepdims=True)
+    smx = self.softmax(O)
 
     if y is None:
-      return self.smx
+      return smx
     
     # 2. Compute loss
-    loss = np.sum(-np.log(self.smx[np.arange(N), y])) / N
+    loss = np.sum(-np.log(smx[np.arange(N), y])) / N
     loss += reg * (np.sum(self.params['W1']**2) + np.sum(self.params['W2']**2))
 
     # 3. Compute gradients of parameters
-    smx_copy = self.smx.copy()
-    smx_copy[np.arange(N), y] -= 1
-    dO = smx_copy / N
+    grads = {}
 
-    def f(W2):
-      O = np.matmul(self.H, W2) + self.params['b2']
-      O_ = O.copy()
-      O_ -= np.expand_dims(np.max(O_, axis=1), axis=1)
-      smx = self.softmax(O_)
-      loss = np.sum(-np.log(smx[np.arange(N), y])) / N
-      return loss
+    smx[np.arange(N), y] -= 1
+    dO = smx / N
 
-    self.grads['W2'] = self.num_grad(f, self.params['W2'])
-    # self.grads['W2'] += 2 * reg * self.params['W2']
-    # self.grads['b2'] = np.sum(O_copy, axis=0)
+    # [H, C] = [H, N] x [N, C]
+    grads['W2'] = np.matmul(H_act.T, dO)
+    grads['W2'] += 2 * reg * self.params['W2']
+    grads['b2'] = np.sum(dO, axis=0)
 
-    # [N, H] = [N, C] x [C, H]
-    # dH = np.matmul(dO, self.params['W2'].T)
-    # dH_ = dH * ((1-self.H) * self.H)
+    # # [N, H] = [N, C] x [C, H]
+    dH_act = np.matmul(dO, self.params['W2'].T)
+    if act == 'relu':
+      dH_lin = dH_act * (H_act > 0)
+    elif act == 'sigmoid':
+      dH_lin = dH_act * ((1-H_act) * H_act)
 
-    # # [D, H] = [D, N] x [N, H]
-    # self.grads['W1'] = np.matmul(X.T, dH_)
-    # self.grads['W1'] += 2 * reg * self.params['W1']
-    # self.grads['b1'] = np.sum(self.H_, axis=0)
+    # [D, H] = [D, N] x [N, H]
+    grads['W1'] = np.matmul(X.T, dH_lin)
+    grads['W1'] += 2 * reg * self.params['W1']
+    grads['b1'] = np.sum(dH_lin, axis=0)
 
     for param, value in self.params.items():
-      if param in self.grads:
-        assert value.shape == self.grads[param].shape, \
+      if param in grads:
+        assert value.shape == grads[param].shape, \
         'Array <-> Gradient Shape Mismatch ({})'.format(param)
 
-    return loss
+    return loss, grads
     
-  def train(self, X, y, epochs, reg=0, lr=0.1):
+  def train(self, X, y, batch_sz=100, epochs=10, reg=0, lr=0.1, decay=False, lr_decay=0.9, patience=10):
     """
     Train the neural network
 
@@ -113,18 +107,33 @@ class NeuralNet():
     Output : (loss_history)
       - loss_history (list<float>) : List of loss history through training epochs
     """
+    N = X.shape[0]
     loss_history = []
 
-    with tqdm(total=epochs) as pbar:
-      for epoch in range(epochs):
-        loss_history.append(self.loss(X, y, reg=reg))
+    with trange(epochs) as t:
+      no_improve = 0
+      for epoch in t:
+        t.set_description('Runing epoch {}/{}'.format(epoch+1, epochs))
 
-        # Update all parameters
+        # Run SGD(Stochastic Gradient Descent)
+        batch_indices = np.random.choice(N, batch_sz)
+        X_batch = X[batch_indices]
+        y_batch = y[batch_indices]
+
+        loss, grads = self.loss(X_batch, y_batch, reg=reg)
+        
+        # Learning rate decay
+        if decay and len(loss_history) != 0 and loss_history[-1] <= loss:
+          no_improve += 1
+          if no_improve >= patience:
+            no_improve = 0
+            lr *= lr_decay
+
+        loss_history.append(loss)
+
+        # Update parameters
         for param in self.params:
-          if param in self.grads:
-            self.params[param] -= lr * self.grads[param]
-
-        pbar.update(1)
+          self.params[param] -= lr * grads[param]
     
     return loss_history
   
@@ -132,5 +141,5 @@ class NeuralNet():
     """
     Predict labels of input data array
     """
-    smx_scores = self.loss(X)
-    return np.argmax(smx_scores, axis=1)
+    smx = self.loss(X)
+    return np.argmax(smx, axis=1)
